@@ -1,3 +1,97 @@
-# WeVibe Guard
+# wevibe-guard
 
-Prompt injection and credential scanner for WeVibe Network.
+Fast prompt-injection, credential, and exfiltration scanner for WeVibe memories.
+
+## Overview
+
+`wevibe-guard` is a Rust security scanner (`edition = 2021`) built on YARA-X.
+It is published as both:
+
+- a library crate: `wevibe_guard`
+- a CLI binary: `wevibe-guard`
+
+The scanner combines signature rules and pattern-based heuristics to detect high-signal threats in memory text, keywords, and metadata.
+
+This project is in active alpha and is designed to provide strong, deterministic warnings while the broader moderation and approval flow continues to evolve.
+
+## Role in the WeVibe Network
+
+`wevibe-guard` runs locally in client workflows at two points:
+
+- **submission time** (advisory scan before new memory content is sent)
+- **recall time** (pre-injection scan before memory is provided to an agent)
+
+Integrations (including MCP and plugins) typically invoke it via `WEVIBE_GUARD_BIN`.
+
+Guard is **advisory** by design: it warns and surfaces detections, but does not block automatically. The human approver remains the primary security boundary.
+
+## Detection coverage
+
+Current rule and heuristic coverage includes:
+
+- YARA-signature prompt injection patterns (instruction bypass, role hijack, jailbreak/system prompt extraction)
+- credential leakage patterns (AWS keys/secrets, token formats, connection strings)
+- Unicode mathematical-alphanumeric / homoglyph injection indicators
+- Base64-encoded injection and credential payloads
+- suspicious URLs, hostnames, and IPv4 endpoints
+- malicious dependency/config directives and suspicious outbound install patterns
+- shell-command exfiltration patterns (including curl/wget-style execution chains)
+
+Guard does **not** fully solve semantic natural-language attacks on its own. Those are mitigated through human review and reputation/moderation controls.
+
+## Getting started
+
+### Build
+
+```bash
+cargo build
+```
+
+Release build:
+
+```bash
+cargo build --release
+```
+
+### Run the CLI
+
+The CLI reads a JSON request from `stdin` and prints JSON findings to `stdout`.
+
+Example:
+
+```bash
+printf '{"memory":{"text":"hello"},"stack":[],"include_flags":true}' | ./target/debug/wevibe-guard
+```
+
+## Testing
+
+Run tests:
+
+```bash
+cargo test
+```
+
+Run benchmarks:
+
+```bash
+cargo bench
+```
+
+## Configuration
+
+- Set `WEVIBE_GUARD_BIN` in calling applications to point to the preferred guard executable.
+- The CLI accepts structured memory input (`text`, optional `keywords`, optional `metadata`) and returns detections plus optional heuristic flags.
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for current status and planned improvements.
+
+## License
+
+Apache-2.0. See [LICENSE](./LICENSE).
+
+## Links
+
+- Docs: https://github.com/WeVibe-Network/wevibe-docs
+- Organization: https://github.com/WeVibe-Network
+- X: https://x.com/WeVibe_Network
