@@ -12,87 +12,87 @@
 
 ---
 
-Fast prompt-injection, credential, and exfiltration scanner for WeVibe memories.
+Advisory prompt-injection, credential, and exfiltration scanner for WeVibe candidate memories. It warns; it does not block.
 
 ## Overview
 
-`wevibe-guard` is a Rust security scanner (`edition = 2021`) built on YARA-X.
-It is published as both:
+`wevibe-guard` is a Rust scanner (`edition = 2021`) built on YARA-X signature rules plus regex pattern rules. It ships as:
 
 - a library crate: `wevibe_guard`
-- a CLI binary: `wevibe-guard`
+- a CLI binary: `wevibe-guard` (reads a JSON request on stdin, prints JSON findings on stdout)
 
-The scanner combines signature rules and pattern-based heuristics to detect high-signal threats in memory text, keywords, and metadata.
+It scans **candidate memories only** — the structured fields a memory carries (`text`, `keywords`, metadata values) — at the points where memory enters and leaves the network. It does not scan agent or user inputs.
 
-This project is in active alpha and is designed to provide strong, deterministic warnings while the broader moderation and approval flow continues to evolve.
+The project is alpha. Its value is deliberately mechanical: it catches the attack classes a human reviewer cannot reliably eyeball — mathematical-alphanumeric steganography that renders like plain ASCII, Roman-numeral homoglyph substitution, Base64-obfuscated payloads, and pasted credentials — and surfaces them as findings. Guard itself is **fail-open**: it never blocks. The human reviewer remains the security boundary.
 
 ## Role in the WeVibe Network
 
-`wevibe-guard` runs locally in client workflows at two points:
+Guard runs locally in client workflows at two points, because rules improve over time and yesterday-clean memories can match today's signatures:
 
-- **submission time** (advisory scan before new memory content is sent)
-- **recall time** (pre-injection scan before memory is provided to an agent)
+- **Submission time** — advisory scan before candidate memory content is stored on-chain.
+- **Recall time** — pre-injection scan before memory is handed to an agent.
 
-Integrations (including MCP and plugins) typically invoke it via `WEVIBE_GUARD_BIN`.
+Both scans are advisory by design:
 
-Guard is **advisory** by design: it warns and surfaces detections, but does not block automatically. The human approver remains the primary security boundary.
+- Detections are surfaced as findings for the reviewer; nothing is blocked or withheld automatically.
+- The CLI exits `0` even when detections exist — a nonzero exit is not a "blocked memory", it is an operational error: unreadable input, oversized payload (1 MiB cap), or invalid JSON.
+- Guard does not fully solve semantic natural-language attacks on its own. Those are mitigated through human review and reputation/moderation controls.
 
 ## Detection coverage
 
-Current rule and heuristic coverage includes:
+### Prompt injection (YARA signatures)
 
-- YARA-signature prompt injection patterns (instruction bypass, role hijack, jailbreak/system prompt extraction)
-- credential leakage patterns (AWS keys/secrets, token formats, connection strings)
-- Unicode mathematical-alphanumeric / homoglyph injection indicators
-- Base64-encoded injection and credential payloads
-- suspicious URLs, hostnames, and IPv4 endpoints
-- malicious dependency/config directives and suspicious outbound install patterns
-- shell-command exfiltration patterns (including curl/wget-style execution chains)
+Six rules in `src/rules/injection.yar`: instruction-override/bypass phrases, role hijack, DAN-style jailbreak, system-prompt extraction, prompt-boundary/delimiter escape, and Unicode mathematical-alphanumeric injection (U+1D400–U+1D7FF: math-bold/script letters that look like ASCII but defeat naive string matching).
 
-Guard does **not** fully solve semantic natural-language attacks on its own. Those are mitigated through human review and reputation/moderation controls.
+### Credential leakage (regex)
+
+AWS access key IDs and secret access keys, OpenAI API keys (`sk-` formats), GitHub PAT/OAuth/fine-grained tokens (`ghp_`, `gho_`, `github_pat_`), `password`/`secret`/`token` assignments, `mongodb|postgres|mysql|redis://` connection strings, and `.env`-style `*_SECRET` assignments.
+
+### Obfuscation — invisible to the eye
+
+The part of the rule set a reviewer genuinely cannot do by eyeball:
+
+- **Mathematical-alphanumeric injection** — text written in U+1D400–U+1D7FF codepoints that renders like ordinary letters while evading plain-text pattern matching.
+- **Roman-numeral homoglyph substitution** — U+2160–216F glyphs swapped into injection keywords (e.g. a Roman numeral "Ⅰ" standing in for the letter I).
+- **Base64-encoded payloads** — base64 blobs that decode to injection phrases or to credential patterns.
+
+### Exfiltration
+
+- **Suspicious outbound URL** — an HTTP-call verb (`fetch`, `curl`, `wget`, `requests.*`, `axios.*`, `urllib`) accompanied by a URL whose domain falls outside the built-in safe-domain allowlist.
+- **Obfuscated install command** — malicious package-manager flags: pip `--index-url`/`--trusted-host`, npm/yarn/pnpm `--registry`/`--proxy`, `go get`, `cargo add --git`.
+
+### Advisory heuristic flags (opt-in, not detections)
+
+With `include_flags: true` the scan also returns advisory flags: `url`, `package_install`, `endpoint`, `config`, `connection_string`. These mark text worth a human glance at; they are not detections.
 
 ## Getting started
 
 ### Build
 
 ```bash
-cargo build
-```
-
-Release build:
-
-```bash
-cargo build --release
+cargo build            # debug
+cargo build --release  # release
 ```
 
 ### Run the CLI
 
-The CLI reads a JSON request from `stdin` and prints JSON findings to `stdout`.
-
-Example:
+The CLI reads one JSON request from stdin and prints JSON findings to stdout:
 
 ```bash
 printf '{"memory":{"text":"hello"},"stack":[],"include_flags":true}' | ./target/debug/wevibe-guard
 ```
 
-## Testing
-
-Run tests:
+### Test
 
 ```bash
 cargo test
-```
-
-Run benchmarks:
-
-```bash
-cargo bench
+cargo bench   # criterion benchmarks (scan_bench)
 ```
 
 ## Configuration
 
-- Set `WEVIBE_GUARD_BIN` in calling applications to point to the preferred guard executable.
-- The CLI accepts structured memory input (`text`, optional `keywords`, optional `metadata`) and returns detections plus optional heuristic flags.
+- `WEVIBE_GUARD_BIN` — set in calling applications to point at the preferred guard executable (MCP integrations and plugins invoke guard this way).
+- Input shape: `memory.text` plus optional `keywords` and `metadata`, optional `include_flags`. Payloads over 1 MiB are rejected.
 
 ## Roadmap
 
